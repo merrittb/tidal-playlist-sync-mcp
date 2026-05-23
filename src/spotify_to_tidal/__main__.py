@@ -10,6 +10,9 @@ def main():
     parser.add_argument('--config', default='config.yml', help='location of the config file')
     parser.add_argument('--uri', help='synchronize a specific URI instead of the one in the config')
     parser.add_argument('--sync-favorites', action=argparse.BooleanOptionalAction, help='synchronize the favorites')
+    parser.add_argument('--fetch-tidal-urls', action='store_true', help='print mapped Tidal playlist URLs without syncing')
+    parser.add_argument('--test-create-tidal-playlist', action='store_true', help='attempt to create a test playlist on Tidal and show the result')
+    parser.add_argument('--test-playlist-name', default='spotify_to_tidal_test_playlist', help='name for the Tidal test playlist created by --test-create-tidal-playlist')
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
@@ -20,6 +23,27 @@ def main():
     tidal_session = _auth.open_tidal_session()
     if not tidal_session.check_login():
         sys.exit("Could not connect to Tidal")
+    tidal_user_id = getattr(tidal_session.user, 'id', None)
+    tidal_username = getattr(tidal_session.user, 'username', None)
+    print(f"Tidal session opened for user id={tidal_user_id}, username={tidal_username}")
+
+    if args.fetch_tidal_urls:
+        tidal_playlists = _sync.get_tidal_playlists_wrapper(tidal_session)
+        if args.uri:
+            spotify_playlist = spotify_session.playlist(args.uri)
+            mapped_playlist = _sync.pick_tidal_playlist_for_spotify_playlist(spotify_playlist, tidal_playlists)
+            _sync.print_tidal_playlist_urls([mapped_playlist])
+        elif config.get('sync_playlists', None):
+            _sync.print_tidal_playlist_urls(_sync.get_playlists_from_config(spotify_session, tidal_session, config))
+        else:
+            _sync.print_tidal_playlist_urls(_sync.get_user_playlist_mappings(spotify_session, tidal_session, config))
+
+        _sync.print_all_tidal_playlist_urls(tidal_playlists.values())
+        sys.exit(0)
+
+    if args.test_create_tidal_playlist:
+        _sync.test_create_tidal_playlist(tidal_session, args.test_playlist_name)
+        sys.exit(0)
     if args.uri:
         # if a playlist ID is explicitly provided as a command line argument then use that
         spotify_playlist = spotify_session.playlist(args.uri)
@@ -40,6 +64,8 @@ def main():
 
     if sync_favorites:
         _sync.sync_favorites_wrapper(spotify_session, tidal_session, config)
+
+    print("Synchronization complete")
 
 if __name__ == '__main__':
     main()

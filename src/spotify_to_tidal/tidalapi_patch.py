@@ -1,6 +1,8 @@
 import asyncio
 import math
+import time
 from typing import List
+import requests
 import tidalapi
 from tqdm import tqdm
 from tqdm.asyncio import tqdm as atqdm
@@ -23,9 +25,46 @@ def add_multiple_tracks_to_playlist(playlist: tidalapi.UserPlaylist, track_ids: 
     with tqdm(desc="Adding new tracks to Tidal playlist", total=len(track_ids)) as progress:
         while offset < len(track_ids):
             count = min(chunk_size, len(track_ids) - offset)
-            playlist.add(track_ids[offset:offset+chunk_size])
-            offset += count
-            progress.update(count)
+            chunk = track_ids[offset:offset+count]
+            try:
+                playlist.add(chunk)
+                offset += count
+                progress.update(count)
+            except requests.exceptions.HTTPError as e:
+                response = getattr(e, 'response', None)
+                status = response.status_code if response is not None else 'unknown'
+                text = response.text if response is not None else str(e)
+                print(f"Tidal playlist add failed for chunk at offset {offset} with status {status}")
+                print(f"Chunk ids: {chunk}")
+                print(f"Response: {text}")
+                if status in (429, 412):
+                    print("Retryable Tidal error; sleeping briefly before retrying chunk")
+                    time.sleep(2)
+                    try:
+                        playlist.add(chunk)
+                        offset += count
+                        progress.update(count)
+                        continue
+                    except requests.exceptions.HTTPError as e2:
+                        response2 = getattr(e2, 'response', None)
+                        status2 = response2.status_code if response2 is not None else 'unknown'
+                        text2 = response2.text if response2 is not None else str(e2)
+                        print(f"Chunk retry failed with status {status2}")
+                        print(f"Response: {text2}")
+                print("Retrying each track individually")
+                for track_id in chunk:
+                    try:
+                        playlist.add([track_id])
+                        progress.update(1)
+                        offset += 1
+                    except requests.exceptions.HTTPError as e2:
+                        response2 = getattr(e2, 'response', None)
+                        status2 = response2.status_code if response2 is not None else 'unknown'
+                        text2 = response2.text if response2 is not None else str(e2)
+                        print(f"Failed to add individual track {track_id}: status {status2}")
+                        print(f"Response: {text2}")
+                        offset += 1
+                        progress.update(1)
 
 async def _get_all_chunks(url, session, parser, params={}) -> List[tidalapi.Track]:
     """ 

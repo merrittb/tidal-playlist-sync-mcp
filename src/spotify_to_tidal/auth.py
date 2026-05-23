@@ -53,7 +53,10 @@ def open_tidal_session(config = None) -> tidalapi.Session:
     url = login.verification_uri_complete
     if not url.startswith('https://'):
         url = 'https://' + url
-    webbrowser.open(url)
+    try:
+        webbrowser.open(url)
+    except Exception:
+        print(f'Could not open browser automatically. Please visit: {url}')
     future.result()
     with open('.session.yml', 'w') as f:
         yaml.dump( {'session_id': session.session_id,
