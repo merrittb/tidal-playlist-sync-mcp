@@ -6,17 +6,38 @@ from . import sync as _sync
 from . import auth as _auth
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='config.yml', help='location of the config file')
-    parser.add_argument('--uri', help='synchronize a specific URI instead of the one in the config')
-    parser.add_argument('--sync-favorites', action=argparse.BooleanOptionalAction, help='synchronize the favorites')
-    parser.add_argument('--fetch-tidal-urls', action='store_true', help='print mapped Tidal playlist URLs without syncing')
-    parser.add_argument('--test-create-tidal-playlist', action='store_true', help='attempt to create a test playlist on Tidal and show the result')
-    parser.add_argument('--test-playlist-name', default='spotify_to_tidal_test_playlist', help='name for the Tidal test playlist created by --test-create-tidal-playlist')
+    parser = argparse.ArgumentParser(
+        prog='spotify_to_tidal',
+        description='Sync Spotify playlists and liked songs to Tidal.',
+    )
+    parser.add_argument('--config', default='config.yml', metavar='PATH',
+                        help='config file to use (default: config.yml)')
+    parser.add_argument('--uri', metavar='SPOTIFY_URI',
+                        help='sync a single Spotify playlist by URI instead of all playlists')
+    parser.add_argument('--sync-favorites', action=argparse.BooleanOptionalAction,
+                        help='sync liked songs to Tidal favorites (overrides config default)')
+    parser.add_argument('--refresh-session', action='store_true',
+                        help='refresh the cached Tidal session tokens and exit')
+    parser.add_argument('--fetch-tidal-urls', action='store_true',
+                        help='print Tidal playlist URLs for mapped playlists and exit (no sync)')
+    debug = parser.add_argument_group('debug')
+    debug.add_argument('--test-create-tidal-playlist', action='store_true',
+                       help='create a throwaway Tidal playlist to verify write access')
+    debug.add_argument('--test-playlist-name', default='spotify_to_tidal_test_playlist',
+                       metavar='NAME', help='name for the test playlist (default: spotify_to_tidal_test_playlist)')
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
+
+    if args.refresh_session:
+        print("Refreshing Tidal session")
+        tidal_session = _auth.open_tidal_session()
+        if not tidal_session.check_login():
+            sys.exit("Could not connect to Tidal — re-run without --refresh-session to re-authenticate")
+        print("Tidal session refreshed successfully")
+        sys.exit(0)
+
     print("Opening Spotify session")
     spotify_session = _auth.open_spotify_session(config['spotify'])
     print("Opening Tidal session")

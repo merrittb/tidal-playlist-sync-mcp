@@ -1,16 +1,19 @@
 import datetime
+from pathlib import Path
 import sqlalchemy
 from sqlalchemy import Table, Column, String, DateTime, MetaData, insert, select, update, delete
 from typing import Dict, List, Sequence, Set, Mapping
 
+_DEFAULT_DB = str(Path.home() / '.spotify_to_tidal_cache.db')
+
 
 class MatchFailureDatabase:
-    """ 
+    """
     sqlite database of match failures which persists between runs
     this can be used concurrently between multiple processes
     """
 
-    def __init__(self, filename='.cache.db'):
+    def __init__(self, filename=_DEFAULT_DB):
         self.engine = sqlalchemy.create_engine(f"sqlite:///{filename}")
         meta = MetaData()
         self.match_failures = Table('match_failures', meta,

@@ -7,19 +7,36 @@ import tidalapi
 from tqdm import tqdm
 from tqdm.asyncio import tqdm as atqdm
 
-def _remove_indices_from_playlist(playlist: tidalapi.UserPlaylist, indices: List[int]):
-    headers = {'If-None-Match': playlist._etag}
+def _remove_indices_from_playlist(playlist: tidalapi.UserPlaylist, indices: List[int], retries: int = 3):
     index_string = ",".join(map(str, indices))
-    playlist.request.request('DELETE', (playlist._base_url + '/items/%s') % (playlist.id, index_string), headers=headers)
-    playlist._reparse()
+    for attempt in range(retries):
+        headers = {'If-None-Match': playlist._etag}
+        try:
+            playlist.request.request('DELETE', (playlist._base_url + '/items/%s') % (playlist.id, index_string), headers=headers)
+            playlist._reparse()
+            return
+        except requests.exceptions.HTTPError as e:
+            response = getattr(e, 'response', None)
+            status = response.status_code if response is not None else 'unknown'
+            if status == 412 and attempt < retries - 1:
+                time.sleep(1)
+                playlist._reparse()
+            else:
+                raise
 
 def clear_tidal_playlist(playlist: tidalapi.UserPlaylist, chunk_size: int=20):
-    with tqdm(desc="Erasing existing tracks from Tidal playlist", total=playlist.num_tracks) as progress:
-        while playlist.num_tracks:
-            indices = range(min(playlist.num_tracks, chunk_size))
-            _remove_indices_from_playlist(playlist, indices)
-            progress.update(len(indices))
+    remaining = playlist.num_tracks
+    with tqdm(desc="Erasing existing tracks from Tidal playlist", total=remaining) as progress:
+        while remaining > 0:
+            to_delete = min(remaining, chunk_size)
+            _remove_indices_from_playlist(playlist, range(to_delete))
+            remaining -= to_delete
+            progress.update(to_delete)
     
+def _playlist_add_with_reparse(playlist: tidalapi.UserPlaylist, tracks: List[int]):
+    playlist.add(tracks)
+    playlist._reparse()
+
 def add_multiple_tracks_to_playlist(playlist: tidalapi.UserPlaylist, track_ids: List[int], chunk_size: int=20):
     offset = 0
     with tqdm(desc="Adding new tracks to Tidal playlist", total=len(track_ids)) as progress:
@@ -27,7 +44,7 @@ def add_multiple_tracks_to_playlist(playlist: tidalapi.UserPlaylist, track_ids: 
             count = min(chunk_size, len(track_ids) - offset)
             chunk = track_ids[offset:offset+count]
             try:
-                playlist.add(chunk)
+                _playlist_add_with_reparse(playlist, chunk)
                 offset += count
                 progress.update(count)
             except requests.exceptions.HTTPError as e:
@@ -40,8 +57,9 @@ def add_multiple_tracks_to_playlist(playlist: tidalapi.UserPlaylist, track_ids: 
                 if status in (429, 412):
                     print("Retryable Tidal error; sleeping briefly before retrying chunk")
                     time.sleep(2)
+                    playlist._reparse()
                     try:
-                        playlist.add(chunk)
+                        _playlist_add_with_reparse(playlist, chunk)
                         offset += count
                         progress.update(count)
                         continue
@@ -54,7 +72,7 @@ def add_multiple_tracks_to_playlist(playlist: tidalapi.UserPlaylist, track_ids: 
                 print("Retrying each track individually")
                 for track_id in chunk:
                     try:
-                        playlist.add([track_id])
+                        _playlist_add_with_reparse(playlist, [track_id])
                         progress.update(1)
                         offset += 1
                     except requests.exceptions.HTTPError as e2:

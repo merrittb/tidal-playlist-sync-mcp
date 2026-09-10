@@ -34,3 +34,5 @@ dmypy.json
 
 # Visual Studio Code
 .vscode/
+tidal_mcp.log
+.coverage
